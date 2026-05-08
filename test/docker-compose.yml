@@ -1,8 +1,17 @@
 services:
+  ping:
+    image: python:3.13-alpine
+    working_dir: /app
+    command: ["python", "/app/ping_server.py"]
+    volumes:
+      - ./ping_server.py:/app/ping_server.py:ro
+      - ping-state:/state
+
   restic:
-    build:
-      context: ..
+    image: ${TEST_IMAGE}
     restart: unless-stopped
+    depends_on:
+      - ping
     environment:
       RESTIC_REPOSITORY: ${RESTIC_REPOSITORY}
       RESTIC_PASSWORD: ${RESTIC_PASSWORD}
@@ -12,11 +21,14 @@ services:
       CHECK_ARGS: ${CHECK_ARGS}
       RESTIC_BACKUP_ARGS: ${RESTIC_BACKUP_ARGS}
       RESTIC_FORGET_ARGS: ${RESTIC_FORGET_ARGS}
+      PING_URL_BACKUP: ${PING_URL_BACKUP}
+      PING_URL_CHECK: ${PING_URL_CHECK}
     volumes:
       - ./data:/data:ro
       - restic-repository:/repo
       - restic-cache:/root/.cache/restic
 
 volumes:
+  ping-state:
   restic-repository:
   restic-cache:

@@ -12,30 +12,76 @@ TEST_COMPOSE_ARGS := --env-file $(TEST_ENV) -f $(TEST_COMPOSE_FILE)
 .PHONY: build test
 
 build:
-	docker build -t $(IMAGE_NAME) .
+	@docker build -t $(IMAGE_NAME) .
 
 test:
-	if [[ -z "$(COMPOSE)" ]]; then
+	@if [[ -z "$(COMPOSE)" ]]; then
 		echo "docker compose or docker-compose is required" >&2
 		exit 1
 	fi
+	export TEST_IMAGE="$(IMAGE_NAME)"
 	cleanup() {
 		$(COMPOSE) $(TEST_COMPOSE_ARGS) down -v --remove-orphans >/dev/null 2>&1 || true
 	}
+	reset_ping_logs() {
+		$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T ping sh -c ': > /state/backup.log && : > /state/check.log'
+	}
+	wait_for_scheduler() {
+		for attempt in $$(seq 1 30); do
+			if $(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T restic sh -c 'restic cat config >/dev/null 2>&1 && test -f /etc/restic-scheduler.crontab'; then
+				return 0
+			fi
+			if [[ $$attempt -eq 30 ]]; then
+				echo "restic service did not initialize in time" >&2
+				return 1
+			fi
+			sleep 2
+		done
+	}
+	wait_for_job() {
+		local label="$$1"
+		local path="$$2"
+		local marker="$$3"
+		echo "Waiting for scheduled $$label job"
+		for attempt in $$(seq 1 40); do
+			if $(COMPOSE) $(TEST_COMPOSE_ARGS) logs --no-color restic 2>/dev/null | grep -Fq "$$marker" \
+				&& $(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T ping test -s "/state/$$path.log"; then
+				return 0
+			fi
+			if [[ $$attempt -eq 40 ]]; then
+				echo "Scheduled $$label job did not complete in time" >&2
+				$(COMPOSE) $(TEST_COMPOSE_ARGS) logs restic ping >&2 || true
+				return 1
+			fi
+			sleep 2
+		done
+	}
+	show_phase_logs() {
+		local label="$$1"
+		local path="$$2"
+		echo "--- $$label restic logs ---"
+		$(COMPOSE) $(TEST_COMPOSE_ARGS) logs --no-color restic
+		echo "--- $$label ping callbacks ---"
+		$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T ping cat "/state/$$path.log"
+	}
 	trap cleanup EXIT
-	$(COMPOSE) $(TEST_COMPOSE_ARGS) build restic
-	$(COMPOSE) $(TEST_COMPOSE_ARGS) up -d restic
-	for attempt in $$(seq 1 30); do
-		if $(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T restic restic cat config >/dev/null 2>&1; then
-			break
-		fi
-		if [[ $$attempt -eq 30 ]]; then
-			echo "restic service did not initialize in time" >&2
-			exit 1
-		fi
-		sleep 2
-	done
-	$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T restic /usr/local/bin/restic-job backup
-	$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T restic /usr/local/bin/restic-job check
+	echo "Building image $(IMAGE_NAME)"
+	docker build -t "$(IMAGE_NAME)" .
+	echo "Starting ping receiver"
+	$(COMPOSE) $(TEST_COMPOSE_ARGS) up -d ping
+	echo "Testing scheduled backup configuration"
+	reset_ping_logs
+	BACKUP_CRON='* * * * *' CHECK_CRON='' $(COMPOSE) $(TEST_COMPOSE_ARGS) up -d --force-recreate restic
+	wait_for_scheduler
+	$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T restic grep -F '* * * * * /usr/local/bin/restic-job backup' /etc/restic-scheduler.crontab >/dev/null
+	wait_for_job backup backup '### END BACKUP'
 	$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T restic restic ls latest >/dev/null
+	show_phase_logs backup backup
+	echo "Testing scheduled check configuration"
+	reset_ping_logs
+	BACKUP_CRON='' CHECK_CRON='* * * * *' $(COMPOSE) $(TEST_COMPOSE_ARGS) up -d --force-recreate restic
+	wait_for_scheduler
+	$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T restic grep -F '* * * * * /usr/local/bin/restic-job check' /etc/restic-scheduler.crontab >/dev/null
+	wait_for_job check check '### END CHECK'
+	show_phase_logs check check
 	echo "Test stack passed"

@@ -70,7 +70,8 @@ make test
 | Target | Description |
 | --- | --- |
 | `make` / `make build` | Builds the local image as `restic-scheduler:local`. |
-| `make test` | Builds the test image, starts the local test stack, runs backup and check jobs, verifies a snapshot exists, and cleans everything up. |
+| `make test` | Builds the image once, runs it with different settings, verifies scheduled backup and check runs, confirms cron jobs run, confirms ping callbacks fire, prints phase logs, and cleans everything up. |
 
 `make test` requires `docker compose` or `docker-compose`.
 
+The test stack mounts `test/data`, uses a local restic repository volume, and includes a tiny local HTTP receiver so scheduled backup/check jobs can prove both cron execution and ping callback delivery without any external service.
