@@ -12,11 +12,23 @@ fi
 : "${CHECK_ARGS:=--read-data-subset=10%}"
 : "${RESTIC_BACKUP_ARGS:=--verbose --one-file-system}"
 : "${RESTIC_FORGET_ARGS:=--keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune}"
-: "${RESTIC_RETRY_LOCK:=5m}"
+: "${RESTIC_RETRY_LOCK:=35m}"
 : "${JOB_LOCK_FILE:=/var/run/restic-scheduler.lock}"
+
+current_job_label=""
 
 timestamp() {
   date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+on_exit() {
+  local exit_code="$?"
+
+  if [[ "${exit_code}" -ne 0 && -n "${current_job_label}" ]]; then
+    echo "### FAILED ${current_job_label} $(timestamp) ###" >&2
+  fi
+
+  exit "${exit_code}"
 }
 
 read_args() {
@@ -41,6 +53,8 @@ run_restic() {
   restic --retry-lock "${RESTIC_RETRY_LOCK}" "$@"
 }
 
+trap on_exit EXIT
+
 exec 9>"${JOB_LOCK_FILE}"
 if ! flock -n 9; then
   echo "Another restic job is already running, skipping ${job_name}." >&2
@@ -51,6 +65,7 @@ restic unlock
 
 case "${job_name}" in
   backup)
+    current_job_label="BACKUP"
     echo "### BEGIN BACKUP $(timestamp) ###"
     read_args "${RESTIC_BACKUP_ARGS}" backup_args
     run_restic backup "${BACKUP_PATH}" "${backup_args[@]}"
@@ -64,6 +79,7 @@ case "${job_name}" in
     echo "### END BACKUP $(timestamp) ###"
     ;;
   check)
+    current_job_label="CHECK"
     echo "### BEGIN CHECK $(timestamp) ###"
     read_args "${CHECK_ARGS}" check_args
     run_restic check "${check_args[@]}"
