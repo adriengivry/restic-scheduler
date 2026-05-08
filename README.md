@@ -56,10 +56,6 @@ services:
       - restic-cache:/root/.cache/restic
 ```
 
-## Local test stack
-
-A simple local test setup lives under `test/` and uses a local restic repository volume.
-
 ## Make targets
 
 ```sh
