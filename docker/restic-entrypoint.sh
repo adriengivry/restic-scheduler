@@ -19,8 +19,12 @@ done
 
 crontab_file="/etc/restic-scheduler.crontab"
 
+repository_ready() {
+  restic cat config >/dev/null 2>&1
+}
+
 initialize_repository() {
-  if restic cat config >/dev/null 2>&1; then
+  if repository_ready; then
     return
   fi
 
@@ -30,7 +34,19 @@ initialize_repository() {
   fi
 
   echo "Initializing restic repository"
-  restic init
+  local init_output
+  if init_output="$(restic init 2>&1)"; then
+    printf '%s\n' "${init_output}"
+    return
+  fi
+
+  if [[ "${init_output}" == *"already initialized"* ]] && repository_ready; then
+    echo "Restic repository was initialized concurrently; continuing"
+    return
+  fi
+
+  printf '%s\n' "${init_output}" >&2
+  exit 1
 }
 
 write_crontab() {
