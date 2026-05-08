@@ -23,8 +23,45 @@ repository_ready() {
   restic cat config >/dev/null 2>&1
 }
 
+wait_for_repository_ready() {
+  local attempts="${1:-5}"
+  local delay_seconds="${2:-2}"
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if repository_ready; then
+      return 0
+    fi
+
+    if (( attempt < attempts )); then
+      sleep "${delay_seconds}"
+    fi
+  done
+
+  return 1
+}
+
+unlock_repository() {
+  local unlock_output
+
+  if unlock_output="$(restic unlock 2>&1)"; then
+    if [[ -n "${unlock_output}" ]]; then
+      printf '%s\n' "${unlock_output}"
+    fi
+    return
+  fi
+
+  if [[ "${unlock_output}" == *"config file does not exist"* ]] \
+    || [[ "${unlock_output}" == *"unable to open config file"* ]] \
+    || [[ "${unlock_output}" == *"Is there a repository at the following location?"* ]]; then
+    return
+  fi
+
+  printf '%s\n' "${unlock_output}" >&2
+  exit 1
+}
+
 initialize_repository() {
-  if repository_ready; then
+  if wait_for_repository_ready 3 2; then
     return
   fi
 
@@ -40,7 +77,7 @@ initialize_repository() {
     return
   fi
 
-  if [[ "${init_output}" == *"already initialized"* ]] && repository_ready; then
+  if [[ "${init_output}" == *"already initialized"* ]] && wait_for_repository_ready 10 2; then
     echo "Restic repository was initialized concurrently; continuing"
     return
   fi
@@ -66,8 +103,9 @@ write_crontab() {
   fi
 }
 
+unlock_repository
 initialize_repository
-restic unlock
+unlock_repository
 write_crontab
 
 echo "Configured cron jobs:"

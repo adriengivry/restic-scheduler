@@ -26,6 +26,12 @@ test:
 	reset_ping_logs() {
 		$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T ping sh -c ': > /state/backup.log && : > /state/check.log'
 	}
+	restic_container() {
+		$(COMPOSE) $(TEST_COMPOSE_ARGS) ps -q restic
+	}
+	restic_logs() {
+		docker logs "$$(restic_container)" 2>&1
+	}
 	wait_for_scheduler() {
 		for attempt in $$(seq 1 30); do
 			if $(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T restic sh -c 'restic cat config >/dev/null 2>&1 && test -f /etc/restic-scheduler.crontab'; then
@@ -44,7 +50,7 @@ test:
 		local marker="$$3"
 		echo "Waiting for scheduled $$label job"
 		for attempt in $$(seq 1 40); do
-			if $(COMPOSE) $(TEST_COMPOSE_ARGS) logs --no-color restic 2>/dev/null | grep -Fq "$$marker" \
+			if restic_logs | grep -Fq "$$marker" \
 				&& $(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T ping test -s "/state/$$path.log"; then
 				return 0
 			fi
@@ -56,11 +62,25 @@ test:
 			sleep 2
 		done
 	}
+	assert_existing_repository_startup() {
+		local logs
+		logs="$$(restic_logs)"
+		if grep -Fq 'Initializing restic repository' <<<"$$logs"; then
+			echo "Container tried to initialize an existing repository" >&2
+			printf '%s\n' "$$logs" >&2
+			return 1
+		fi
+		if grep -Fq 'Fatal:' <<<"$$logs"; then
+			echo "Container hit a fatal error when starting with an existing repository" >&2
+			printf '%s\n' "$$logs" >&2
+			return 1
+		fi
+	}
 	show_phase_logs() {
 		local label="$$1"
 		local path="$$2"
 		echo "--- $$label restic logs ---"
-		$(COMPOSE) $(TEST_COMPOSE_ARGS) logs --no-color restic
+		restic_logs
 		echo "--- $$label ping callbacks ---"
 		$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T ping cat "/state/$$path.log"
 	}
@@ -77,10 +97,11 @@ test:
 	wait_for_job backup backup '### END BACKUP'
 	$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T restic restic ls latest >/dev/null
 	show_phase_logs backup backup
-	echo "Testing scheduled check configuration"
+	echo "Testing existing repository startup and scheduled check"
 	reset_ping_logs
 	BACKUP_CRON='' CHECK_CRON='* * * * *' $(COMPOSE) $(TEST_COMPOSE_ARGS) up -d --force-recreate restic
 	wait_for_scheduler
+	assert_existing_repository_startup
 	$(COMPOSE) $(TEST_COMPOSE_ARGS) exec -T restic grep -F '* * * * * /usr/local/bin/restic-job check' /etc/restic-scheduler.crontab >/dev/null
 	wait_for_job check check '### END CHECK'
 	show_phase_logs check check
