@@ -20,7 +20,7 @@ done
 crontab_file="/etc/restic-scheduler.crontab"
 
 repository_ready() {
-  restic cat config >/dev/null 2>&1
+  restic cat config --no-lock >/dev/null 2>&1
 }
 
 wait_for_repository_ready() {
