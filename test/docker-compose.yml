@@ -1,0 +1,22 @@
+services:
+  restic:
+    build:
+      context: ..
+    restart: unless-stopped
+    environment:
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY}
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD}
+      BACKUP_CRON: ${BACKUP_CRON}
+      CHECK_CRON: ${CHECK_CRON}
+      BACKUP_PATH: ${BACKUP_PATH}
+      CHECK_ARGS: ${CHECK_ARGS}
+      RESTIC_BACKUP_ARGS: ${RESTIC_BACKUP_ARGS}
+      RESTIC_FORGET_ARGS: ${RESTIC_FORGET_ARGS}
+    volumes:
+      - ./data:/data:ro
+      - restic-repository:/repo
+      - restic-cache:/root/.cache/restic
+
+volumes:
+  restic-repository:
+  restic-cache:

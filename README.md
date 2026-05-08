@@ -1,4 +1,4 @@
-# restic-backup image
+# restic-scheduler
 
 Reusable container image for scheduled `restic` backups and `restic check` runs, intended to be dropped into any stack with only environment variables and a mounted backup path.
 
@@ -55,4 +55,22 @@ services:
       - my-data:/data:ro
       - restic-cache:/root/.cache/restic
 ```
+
+## Local test stack
+
+A simple local test setup lives under `test/` and uses a local restic repository volume.
+
+## Make targets
+
+```sh
+make
+make test
+```
+
+| Target | Description |
+| --- | --- |
+| `make` / `make build` | Builds the local image as `restic-scheduler:local`. |
+| `make test` | Builds the test image, starts the local test stack, runs backup and check jobs, verifies a snapshot exists, and cleans everything up. |
+
+`make test` requires `docker compose` or `docker-compose`.
 
