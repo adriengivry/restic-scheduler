@@ -65,8 +65,8 @@ test:
 	assert_existing_repository_startup() {
 		local logs
 		logs="$$(restic_logs)"
-		if grep -Fq 'Initializing restic repository' <<<"$$logs"; then
-			echo "Container tried to initialize an existing repository" >&2
+		if grep -Fq 'created restic repository' <<<"$$logs"; then
+			echo "Container recreated an existing repository" >&2
 			printf '%s\n' "$$logs" >&2
 			return 1
 		fi

@@ -60,25 +60,25 @@ unlock_repository() {
   exit 1
 }
 
-initialize_repository() {
+ensure_repository_exists() {
   if wait_for_repository_ready 3 2; then
     return
   fi
 
   if [[ "${RESTIC_AUTO_INIT}" != "true" ]]; then
-    echo "Restic repository is not initialized and RESTIC_AUTO_INIT is disabled." >&2
+    echo "Restic repository is not accessible and RESTIC_AUTO_INIT is disabled." >&2
     exit 1
   fi
 
-  echo "Initializing restic repository"
+  echo "Ensuring restic repository exists"
   local init_output
   if init_output="$(restic init 2>&1)"; then
     printf '%s\n' "${init_output}"
     return
   fi
 
-  if [[ "${init_output}" == *"already initialized"* ]] && wait_for_repository_ready 10 2; then
-    echo "Restic repository was initialized concurrently; continuing"
+  if [[ "${init_output}" == *"already initialized"* ]]; then
+    echo "Restic repository already initialized"
     return
   fi
 
@@ -104,8 +104,14 @@ write_crontab() {
 }
 
 unlock_repository
-initialize_repository
+ensure_repository_exists
 unlock_repository
+
+if ! wait_for_repository_ready 10 2; then
+  echo "Restic repository is not ready after startup." >&2
+  exit 1
+fi
+
 write_crontab
 
 echo "Configured cron jobs:"
