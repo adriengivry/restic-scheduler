@@ -12,6 +12,7 @@ fi
 : "${CHECK_ARGS:=--read-data-subset=10%}"
 : "${RESTIC_BACKUP_ARGS:=--verbose --one-file-system}"
 : "${RESTIC_FORGET_ARGS:=--keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune}"
+: "${RESTIC_RETRY_LOCK:=5m}"
 : "${JOB_LOCK_FILE:=/var/run/restic-scheduler.lock}"
 
 timestamp() {
@@ -36,6 +37,10 @@ ping_on_success() {
   fi
 }
 
+run_restic() {
+  restic --retry-lock "${RESTIC_RETRY_LOCK}" "$@"
+}
+
 exec 9>"${JOB_LOCK_FILE}"
 if ! flock -n 9; then
   echo "Another restic job is already running, skipping ${job_name}." >&2
@@ -48,11 +53,11 @@ case "${job_name}" in
   backup)
     echo "### BEGIN BACKUP $(timestamp) ###"
     read_args "${RESTIC_BACKUP_ARGS}" backup_args
-    restic backup "${BACKUP_PATH}" "${backup_args[@]}"
+    run_restic backup "${BACKUP_PATH}" "${backup_args[@]}"
 
     read_args "${RESTIC_FORGET_ARGS}" forget_args
     if [[ "${#forget_args[@]}" -gt 0 ]]; then
-      restic forget "${forget_args[@]}"
+      run_restic forget "${forget_args[@]}"
     fi
 
     ping_on_success "${PING_URL_BACKUP:-}"
@@ -61,7 +66,7 @@ case "${job_name}" in
   check)
     echo "### BEGIN CHECK $(timestamp) ###"
     read_args "${CHECK_ARGS}" check_args
-    restic check "${check_args[@]}"
+    run_restic check "${check_args[@]}"
     ping_on_success "${PING_URL_CHECK:-}"
     echo "### END CHECK $(timestamp) ###"
     ;;

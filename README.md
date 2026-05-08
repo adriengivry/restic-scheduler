@@ -29,6 +29,7 @@ S3-compatible backends typically also need credentials such as `AWS_ACCESS_KEY_I
 | `CHECK_ARGS` | `--read-data-subset=10%` |
 | `RESTIC_BACKUP_ARGS` | `--verbose --one-file-system` |
 | `RESTIC_FORGET_ARGS` | `--keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune` |
+| `RESTIC_RETRY_LOCK` | `5m` |
 | `RESTIC_AUTO_INIT` | `true` |
 | `PING_URL_BACKUP` | unset |
 | `PING_URL_CHECK` | unset |
