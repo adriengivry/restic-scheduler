@@ -11,7 +11,17 @@ permissions:
   packages: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run test stack
+        run: make test
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
