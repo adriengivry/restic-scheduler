@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-job_name="${1:-}"
-
-if [[ -z "${job_name}" ]]; then
-  echo "Usage: restic-job <backup|check>" >&2
-  exit 1
-fi
+job="${1:-}"
+[[ -n "$job" ]] || { echo "Usage: restic-job <backup|check>" >&2; exit 1; }
 
 : "${BACKUP_PATH:=/data}"
 : "${CHECK_ARGS:=--read-data-subset=10%}"
@@ -15,79 +11,41 @@ fi
 : "${RESTIC_RETRY_LOCK:=35m}"
 : "${JOB_LOCK_FILE:=/var/run/restic-scheduler.lock}"
 
-current_job_label=""
-
-timestamp() {
-  date -u +%Y-%m-%dT%H:%M:%SZ
-}
-
+timestamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 on_exit() {
-  local exit_code="$?"
-
-  if [[ "${exit_code}" -ne 0 && -n "${current_job_label}" ]]; then
-    echo "### FAILED ${current_job_label} $(timestamp) ###" >&2
-  fi
-
-  exit "${exit_code}"
+  local code=$?
+  [[ $code -eq 0 ]] || echo "### FAILED $job $(timestamp) ###" >&2
+  exit $code
 }
-
-read_args() {
-  local raw_value="${1:-}"
-  local -n target_ref="$2"
-
-  target_ref=()
-  if [[ -n "${raw_value}" ]]; then
-    read -r -a target_ref <<<"${raw_value}"
-  fi
-}
-
-ping_on_success() {
-  local url="${1:-}"
-
-  if [[ -n "${url}" ]]; then
-    curl -fsS --retry 3 --max-time 30 "${url}" >/dev/null
-  fi
-}
-
-run_restic() {
-  restic --retry-lock "${RESTIC_RETRY_LOCK}" "$@"
-}
-
 trap on_exit EXIT
 
-exec 9>"${JOB_LOCK_FILE}"
+exec 9>"$JOB_LOCK_FILE"
 if ! flock -n 9; then
-  echo "Another restic job is already running, skipping ${job_name}." >&2
+  echo "Another restic job is already running, skipping $job." >&2
   exit 0
 fi
 
 restic unlock
 
-case "${job_name}" in
+case "$job" in
   backup)
-    current_job_label="BACKUP"
     echo "### BEGIN BACKUP $(timestamp) ###"
-    read_args "${RESTIC_BACKUP_ARGS}" backup_args
-    run_restic backup "${BACKUP_PATH}" "${backup_args[@]}"
-
-    read_args "${RESTIC_FORGET_ARGS}" forget_args
-    if [[ "${#forget_args[@]}" -gt 0 ]]; then
-      run_restic forget "${forget_args[@]}"
-    fi
-
-    ping_on_success "${PING_URL_BACKUP:-}"
+    read -ra backup_args <<< "${RESTIC_BACKUP_ARGS:-}"
+    restic --retry-lock "$RESTIC_RETRY_LOCK" backup "$BACKUP_PATH" "${backup_args[@]}"
+    read -ra forget_args <<< "${RESTIC_FORGET_ARGS:-}"
+    [[ ${#forget_args[@]} -gt 0 ]] && restic --retry-lock "$RESTIC_RETRY_LOCK" forget "${forget_args[@]}"
+    [[ -n "${PING_URL_BACKUP:-}" ]] && curl -fsS --retry 3 --max-time 30 "$PING_URL_BACKUP" >/dev/null
     echo "### END BACKUP $(timestamp) ###"
     ;;
   check)
-    current_job_label="CHECK"
     echo "### BEGIN CHECK $(timestamp) ###"
-    read_args "${CHECK_ARGS}" check_args
-    run_restic check "${check_args[@]}"
-    ping_on_success "${PING_URL_CHECK:-}"
+    read -ra check_args <<< "${CHECK_ARGS:-}"
+    restic --retry-lock "$RESTIC_RETRY_LOCK" check "${check_args[@]}"
+    [[ -n "${PING_URL_CHECK:-}" ]] && curl -fsS --retry 3 --max-time 30 "$PING_URL_CHECK" >/dev/null
     echo "### END CHECK $(timestamp) ###"
     ;;
   *)
-    echo "Unknown job: ${job_name}" >&2
+    echo "Unknown job: $job" >&2
     exit 1
     ;;
 esac

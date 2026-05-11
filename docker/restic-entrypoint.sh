@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-required_vars=(
-  RESTIC_REPOSITORY
-  RESTIC_PASSWORD
-)
-
-for var_name in "${required_vars[@]}"; do
-  if [[ -z "${!var_name:-}" ]]; then
-    echo "Missing required environment variable: ${var_name}" >&2
-    exit 1
-  fi
+for var in RESTIC_REPOSITORY RESTIC_PASSWORD; do
+  [[ -n "${!var:-}" ]] || { echo "Missing required environment variable: ${var}" >&2; exit 1; }
 done
 
 : "${BACKUP_CRON:=0 3 * * *}"
@@ -23,98 +15,59 @@ repository_ready() {
   restic cat config --no-lock >/dev/null 2>&1
 }
 
-wait_for_repository_ready() {
-  local attempts="${1:-5}"
-  local delay_seconds="${2:-2}"
-
-  for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if repository_ready; then
-      return 0
-    fi
-
-    if (( attempt < attempts )); then
-      sleep "${delay_seconds}"
-    fi
-  done
-
-  return 1
-}
-
 unlock_repository() {
-  local unlock_output
-
-  if unlock_output="$(restic unlock 2>&1)"; then
-    if [[ -n "${unlock_output}" ]]; then
-      printf '%s\n' "${unlock_output}"
-    fi
+  local out
+  if out="$(restic unlock 2>&1)"; then
+    [[ -z "$out" ]] || echo "$out"
     return
   fi
-
-  if [[ "${unlock_output}" == *"config file does not exist"* ]] \
-    || [[ "${unlock_output}" == *"unable to open config file"* ]] \
-    || [[ "${unlock_output}" == *"Is there a repository at the following location?"* ]]; then
-    return
-  fi
-
-  printf '%s\n' "${unlock_output}" >&2
+  case "$out" in
+    *"config file does not exist"*|*"unable to open config file"*|*"Is there a repository at the following location?"*)
+      return ;;
+  esac
+  echo "$out" >&2
   exit 1
 }
 
 ensure_repository_exists() {
-  if wait_for_repository_ready 3 2; then
-    return
-  fi
+  for ((i = 1; i <= 5; i++)); do
+    repository_ready && return
+    (( i < 5 )) && sleep 2
+  done
 
   if [[ "${RESTIC_AUTO_INIT}" != "true" ]]; then
     echo "Restic repository is not accessible and RESTIC_AUTO_INIT is disabled." >&2
     exit 1
   fi
 
-  echo "Ensuring restic repository exists"
-  local init_output
-  if init_output="$(restic init 2>&1)"; then
-    printf '%s\n' "${init_output}"
-    return
-  fi
-
-  if [[ "${init_output}" == *"already initialized"* ]]; then
-    echo "Restic repository already initialized"
-    return
-  fi
-
-  printf '%s\n' "${init_output}" >&2
-  exit 1
-}
-
-write_crontab() {
-  : > "${crontab_file}"
-
-  if [[ -n "${BACKUP_CRON}" ]]; then
-    printf '%s /usr/local/bin/restic-job backup\n' "${BACKUP_CRON}" >> "${crontab_file}"
-  fi
-
-  if [[ -n "${CHECK_CRON}" ]]; then
-    printf '%s /usr/local/bin/restic-job check\n' "${CHECK_CRON}" >> "${crontab_file}"
-  fi
-
-  if [[ ! -s "${crontab_file}" ]]; then
-    echo "No jobs configured. Set BACKUP_CRON and/or CHECK_CRON." >&2
+  echo "Initializing restic repository"
+  local out
+  if out="$(restic init 2>&1)"; then
+    echo "$out"
+  elif [[ "$out" != *"already initialized"* ]]; then
+    echo "$out" >&2
     exit 1
   fi
+
+  for ((i = 1; i <= 10; i++)); do
+    repository_ready && return
+    sleep 2
+  done
+
+  echo "Restic repository is not ready after initialization." >&2
+  exit 1
 }
 
 unlock_repository
 ensure_repository_exists
-unlock_repository
 
-if ! wait_for_repository_ready 10 2; then
-  echo "Restic repository is not ready after startup." >&2
-  exit 1
-fi
+: > "$crontab_file"
+[[ -n "${BACKUP_CRON}" ]] && printf '%s /usr/local/bin/restic-job backup\n' "${BACKUP_CRON}" >> "$crontab_file"
+[[ -n "${CHECK_CRON}" ]] && printf '%s /usr/local/bin/restic-job check\n' "${CHECK_CRON}" >> "$crontab_file"
 
-write_crontab
+[[ -s "$crontab_file" ]] || { echo "No jobs configured. Set BACKUP_CRON and/or CHECK_CRON." >&2; exit 1; }
 
 echo "Configured cron jobs:"
-cat "${crontab_file}"
+cat "$crontab_file"
 
-exec /usr/local/bin/supercronic "${crontab_file}"
+exec supercronic "$crontab_file"
