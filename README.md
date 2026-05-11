@@ -6,8 +6,7 @@ Reusable container image for scheduled `restic` backups and `restic check` runs,
 
 - initializes the repository automatically by default
 - clears stale restic locks at startup and before each job
-- runs scheduled backup and check jobs with `supercronic`
-- prevents overlapping jobs with a local lock file
+- runs scheduled backup and check jobs via a built-in cron loop
 - optionally calls healthcheck/ping URLs after successful jobs
 
 ## Required environment variables
@@ -33,7 +32,6 @@ S3-compatible backends typically also need credentials such as `AWS_ACCESS_KEY_I
 | `RESTIC_AUTO_INIT` | `true` |
 | `PING_URL_BACKUP` | unset |
 | `PING_URL_CHECK` | unset |
-| `JOB_LOCK_FILE` | `/var/run/restic-scheduler.lock` |
 
 Set `BACKUP_CRON` or `CHECK_CRON` to an empty value to disable that job.
 
@@ -71,6 +69,6 @@ make test
 | `make` / `make build` | Builds the local image as `restic-scheduler:local`. |
 | `make test` | Builds the image once, runs it with different settings, verifies scheduled backup and check runs, confirms restart against an existing repository works, confirms cron jobs run, confirms ping callbacks fire, prints phase logs, and cleans everything up. |
 
-`make test` requires `docker compose` or `docker-compose`.
+`make test` requires `docker compose` (or `docker-compose`) and `lua`.
 
 The test stack mounts `test/data`, uses a local restic repository volume, and includes a tiny local HTTP receiver so scheduled backup/check jobs can prove both cron execution and ping callback delivery without any external service.

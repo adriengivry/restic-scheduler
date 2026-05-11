@@ -1,10 +1,7 @@
 services:
   ping:
-    image: python:3.13-alpine
-    working_dir: /app
-    command: ["python", "/app/ping_server.py"]
+    build: .
     volumes:
-      - ./ping_server.py:/app/ping_server.py:ro
       - ping-state:/state
 
   restic:
